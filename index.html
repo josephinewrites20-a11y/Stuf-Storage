@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Stuf — Ancillary Revenue Calculator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    /* Minimal clean styling */
+    :root{--bg:#f6f7fb;--card:#ffffff;--muted:#6b7280;--accent:#0f62fe;--success:#16a34a}
+    body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; background:var(--bg); margin:0;padding:24px}
+    .wrap{max-width:820px;margin:24px auto;padding:20px;background:var(--card);border-radius:12px;box-shadow:0 6px 20px rgba(16,24,40,0.08)}
+    h1{margin:0 0 14px;font-size:20px}
+    label{display:block;font-weight:600;margin-top:12px;color:#111827}
+    select,input{width:100%;padding:10px;border:1px solid #e6e9ef;border-radius:8px;margin-top:6px;font-size:14px}
+    .row{display:flex;gap:12px}
+    .col{flex:1}
+    .results{background:#f3f4f6;padding:14px;border-radius:8px;margin-top:16px}
+    .muted{color:var(--muted);font-size:13px}
+    .btn{display:inline-block;padding:10px 14px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
+    .btn-primary{background:var(--accent);color:white}
+    .btn-ghost{background:#0f172a05;color:var(--accent);border:1px solid #e6e9ef}
+    .small{font-size:13px;color:var(--muted);}
+    .footer{margin-top:18px;display:flex;gap:10px;align-items:center}
+    a.stuf-link{display:inline-block;padding:10px 14px;border-radius:8px;background:#059669;color:white;text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <h1>Stuf — Ancillary Revenue Calculator</h1>
+    <p class="muted">Enter your unused space and choose a Stuf priority market to see landlord revenue potential (no TI / CapEx shown).</p>
+
+    <label>Available Space (sq. ft.)</label>
+    <input id="spaceInput" type="number" placeholder="e.g. 10000" min="0" />
+
+    <label>Market (priority)</label>
+    <select id="marketSelect">
+      <option value="NY">New York — $30/sf (landlord share)</option>
+      <option value="SF">San Francisco — $20/sf</option>
+      <option value="BOS">Boston — $20/sf</option>
+      <option value="DC">Washington, D.C. — $20/sf</option>
+      <option value="LA">Los Angeles — $20/sf</option>
+    </select>
+
+    <div class="results" id="results" aria-live="polite" style="display:none">
+      <div><strong>Storage SF (70% efficiency):</strong> <span id="storageSf">—</span></div>
+      <div><strong>Annual Landlord Rent Share:</strong> $<span id="annualRevenue">—</span></div>
+      <div><strong>Monthly Landlord Rent Share:</strong> $<span id="monthlyRevenue">—</span></div>
+      <div class="small" style="margin-top:8px">Assumptions: Efficiency fixed at <strong>70%</strong>. Rent applied: <strong>$30/sf</strong> for NY; <strong>$20/sf</strong> for SF, BOS, DC, LA.</div>
+    </div>
+
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="downloadBtn">Download My Report</button>
+      <a class="stuf-link" href="https://www.stufstorage.com/contact" target="_blank" rel="noopener">Talk to Stuf</a>
+    </div>
+
+    <!-- email modal -->
+    <div id="emailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center">
+      <div style="background:white;padding:18px;border-radius:10px;max-width:420px;margin:auto;">
+        <h3 style="margin:0 0 10px">Enter your email to download</h3>
+        <input id="emailInput" type="email" placeholder="you@example.com" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6e9ef" />
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+          <button onclick="closeModal()" class="btn btn-ghost">Cancel</button>
+          <button onclick="submitAndDownload()" class="btn btn-primary">Submit & Download</button>
+        </div>
+        <div class="small" style="margin-top:8px">We only use your email to send the PDF. (No other data sent unless you enable CRM integration.)</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Fixed business rules
+  const EFFICIENCY = 0.70; // 70%
+  function rentForMarket(market) {
+    return market === 'NY' ? 30 : 20;
+  }
+
+  // Elements
+  const spaceInput = document.getElementById('spaceInput');
+  const marketSelect = document.getElementById('marketSelect');
+  const resultsDiv = document.getElementById('results');
+  const storageSfEl = document.getElementById('storageSf');
+  const annualEl = document.getElementById('annualRevenue');
+  const monthlyEl = document.getElementById('monthlyRevenue');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const emailModal = document.getElementById('emailModal');
+  const emailInput = document.getElementById('emailInput');
+
+  // State
+  let calcSnapshot = {};
+
+  // Calculation logic (final model, no TI)
+  function calculate() {
+    const space = Math.max(0, Number(spaceInput.value) || 0);
+    const market = marketSelect.value;
+    const rent = rentForMarket(market);
+
+    const storageSf = Math.round(space * EFFICIENCY);
+    const annual = storageSf * rent; // landlord annual share
+    const monthly = annual / 12;
+
+    // Update UI
+    if (space === 0) {
+      resultsDiv.style.display = 'none';
+    } else {
+      resultsDiv.style.display = 'block';
+      storageSfEl.textContent = storageSf.toLocaleString();
+      annualEl.textContent = annual.toLocaleString(undefined, {maximumFractionDigits:0});
+      monthlyEl.textContent = monthly.toLocaleString(undefined, {maximumFractionDigits:0});
+    }
+
+    // Save snapshot for PDF
+    calcSnapshot = {
+      inputSpace: space,
+      market,
+      rentPerSf: rent,
+      storageSf,
+      annual,
+      monthly,
+      efficiency: EFFICIENCY
+    };
+
+    return calcSnapshot;
+  }
+
+  // Download flow: email-gated PDF
+  downloadBtn.addEventListener('click', () => {
+    const snapshot = calculate();
+    if (!snapshot.inputSpace || snapshot.inputSpace <= 0) {
+      alert('Please enter available space (sq ft) to generate a report.');
+      return;
+    }
+    openModal();
+  });
+
+  function openModal(){ emailModal.style.display = 'flex'; emailInput.focus(); }
+  function closeModal(){ emailModal.style.display = 'none'; }
+
+  function submitAndDownload(){
+    const email = (emailInput.value || '').trim();
+    if (!email || !email.includes('@')) { alert('Please enter a valid email.'); return; }
+    const snap = calculate();
+    generatePdf(snap, email);
+    closeModal();
+    // NOTE: if you want to capture inputs to a Google Sheet / CRM, you can post `snap` + email to your webhook here.
+  }
+
+  // PDF generation using jsPDF
+  function generatePdf(snap, email){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({unit:'pt', format:'a4'});
+    const margin = 40;
+    let y = 60;
+    doc.setFontSize(16);
+    doc.text('Stuf — Ancillary Revenue Report', 210, y, {align: 'center'}); y += 28;
+    doc.setFontSize(11);
+    doc.text(`Email: ${email}`, margin, y); y += 18;
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, margin, y); y += 24;
+
+    doc.setFontSize(12);
+    doc.text('Inputs', margin, y); y += 16;
+    doc.setFontSize(10);
+    doc.text(`Available Space (SF): ${snap.inputSpace.toLocaleString()}`, margin, y); y += 14;
+    doc.text(`Market: ${snap.market}`, margin, y); y += 14;
+    doc.text(`Efficiency (fixed): ${snap.efficiency * 100}%`, margin, y); y += 20;
+
+    doc.setFontSize(12);
+    doc.text('Results (Landlord Share)', margin, y); y += 16;
+    doc.setFontSize(10);
+    doc.text(`Storage SF (70%): ${snap.storageSf.toLocaleString()}`, margin, y); y += 14;
+    doc.text(`Rent used (per SF): $${snap.rentPerSf}/sf`, margin, y); y += 14;
+    doc.text(`Annual Rent Share: $${Number(snap.annual).toLocaleString()}`, margin, y); y += 14;
+    doc.text(`Monthly Rent Share: $${Number(snap.monthly).toLocaleString(undefined,{maximumFractionDigits:0})}`, margin, y); y += 18;
+
+    doc.setFontSize(9);
+    doc.text('Notes: Efficiency is a Stuf assumption (70%). Rent per SF applied is $30 for NY, $20 for priority markets SF, BOS, DC, LA. This calculator shows revenue upside only (no TI / CapEx shown).', margin, y, {maxWidth: 500});
+    doc.save('Stuf_Ancillary_Revenue_Report.pdf');
+  }
+
+  // live updates
+  spaceInput.addEventListener('input', calculate);
+  marketSelect.addEventListener('change', calculate);
+
+  // initial
+  calculate();
+</script>
+</body>
+</html>
